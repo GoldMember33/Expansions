@@ -2,16 +2,12 @@ package com.pixar02.papi.expansion;
 
 import me.clip.placeholderapi.expansion.Configurable;
 import me.clip.placeholderapi.expansion.PlaceholderExpansion;
-import me.ryanhamshire.GriefPrevention.Claim;
-import me.ryanhamshire.GriefPrevention.DataStore;
-import me.ryanhamshire.GriefPrevention.GriefPrevention;
-import me.ryanhamshire.GriefPrevention.PlayerData;
+import me.ryanhamshire.GriefPrevention.*;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
 
-import javax.xml.crypto.Data;
 import java.text.NumberFormat;
 import java.util.*;
 
@@ -64,7 +60,7 @@ public class GriefPreventionExpansion extends PlaceholderExpansion implements Co
      */
     @Override
     public String getVersion() {
-        return "1.8.0";
+        return "1.8.1";
     }
 
     @Override
@@ -93,6 +89,8 @@ public class GriefPreventionExpansion extends PlaceholderExpansion implements Co
         placeholders.add("%griefprevention_claims_formatted%");
         placeholders.add("%griefprevention_bonusclaims%");
         placeholders.add("%griefprevention_bonusclaims_formatted%");
+        placeholders.add("%griefprevention_usedclaimblocks%");
+        placeholders.add("%griefprevention_usedclaimblocks_formatted%");
         placeholders.add("%griefprevention_accruedclaims%");
         placeholders.add("%griefprevention_accruedclaims_formatted%");
         placeholders.add("%griefprevention_accruedclaims_limit%");
@@ -102,6 +100,9 @@ public class GriefPreventionExpansion extends PlaceholderExpansion implements Co
         placeholders.add("%griefprevention_claimedblocks_current%");
         placeholders.add("%griefprevention_remainingclaims%");
         placeholders.add("%griefprevention_remainingclaims_formatted%");
+        placeholders.add("%griefprevention_currentclaim_player_is_owner%");
+        placeholders.add("%griefprevention_currentclaim_player_can_access%");
+        placeholders.add("%griefprevention_inclaim%");
         placeholders.add("%griefprevention_currentclaim_ownername%");
         placeholders.add("%griefprevention_currentclaim_ownername_color%");
         return placeholders;
@@ -118,6 +119,10 @@ public class GriefPreventionExpansion extends PlaceholderExpansion implements Co
         }
 
         Player player = p.getPlayer();
+
+        if (player == null || !player.isOnline()) {
+            return "";
+        }
 
         DataStore DataS = plugin.dataStore;
         PlayerData pd = DataS.getPlayerData(player.getUniqueId());
@@ -149,6 +154,17 @@ public class GriefPreventionExpansion extends PlaceholderExpansion implements Co
             return String.valueOf(pd.getBonusClaimBlocks());
         } else if (identifier.equals("bonusclaims_formatted")) {
             return fixMoney(pd.getBonusClaimBlocks());
+        }
+
+
+         // %griefprevention_usedclaimblocks%
+         // %griefprevention_usedclaimblocks_formatted%
+        if (identifier.startsWith("usedclaimblocks")) {
+            int totalClaims = pd.getClaims().size() + pd.getAccruedClaimBlocks();
+            int remainingClaims = pd.getRemainingClaimBlocks();
+
+            int usedClaims = totalClaims - remainingClaims;
+            return identifier.endsWith("formatted") ? fixMoney(usedClaims) : String.valueOf(usedClaims);
         }
 
         /*
@@ -206,6 +222,51 @@ public class GriefPreventionExpansion extends PlaceholderExpansion implements Co
             return fixMoney(pd.getRemainingClaimBlocks());
         }
 
+        // %griefprevention_inclaim%
+        if (identifier.equals("inclaim")) {
+            return String.valueOf(DataS.getClaimAt(player.getLocation(), true, null) != null);
+        }
+
+        // %griefprevention_currentclaim_player_is_owner%
+        if (identifier.equals("currentclaim_player_is_owner")) {
+            Claim claim = DataS.getClaimAt(player.getLocation(), true, null);
+            if (claim == null) {
+                return String.valueOf(false);
+            }
+
+            return String.valueOf(Objects.equals(claim.getOwnerName(), p.getName()));
+        }
+
+        // %griefprevention_currentclaim_player_can_access%
+        if (identifier.equals("currentclaim_player_can_access")) {
+            try {
+                Claim claim = DataS.getClaimAt(player.getLocation(), true, null);
+                if (claim == null) {
+                    return String.valueOf(false);
+                }
+
+                if (claim.getOwnerName().equals(player.getName())) {
+                    return String.valueOf(true);
+
+                } else {
+                    ClaimPermission claimPermission = claim.getPermission(String.valueOf(player.getUniqueId()));
+                    if (claimPermission == null) {
+                        return String.valueOf(false);
+                    } else {
+                        return String.valueOf(claimPermission.isGrantedBy(ClaimPermission.Access) ||
+                                claimPermission.isGrantedBy(ClaimPermission.Build) ||
+                                claimPermission.isGrantedBy(ClaimPermission.Manage) ||
+                                claimPermission.isGrantedBy(ClaimPermission.Edit) ||
+                                claimPermission.isGrantedBy(ClaimPermission.Inventory));
+                    }
+                }
+
+            } catch (Exception e) {
+                e.printStackTrace();
+                return "";
+            }
+        }
+
         // %griefprevention_currentclaim_ownername_color%
         // %griefprevention_currentclaim_ownername%
         if (identifier.equals("currentclaim_ownername")) {
@@ -214,8 +275,9 @@ public class GriefPreventionExpansion extends PlaceholderExpansion implements Co
                 return ChatColor.translateAlternateColorCodes('&',
                         getString("translate.unclaimed", "Unclaimed!"));
             } else {
-                return String.valueOf(ChatColor.translateAlternateColorCodes('&', claim.getOwnerName()));
+                return ChatColor.translateAlternateColorCodes('&', claim.getOwnerName());
             }
+
         } else if (identifier.equals("currentclaim_ownername_color")) {
             Claim claim = DataS.getClaimAt(player.getLocation(), true, null);
             if (claim == null) {
@@ -223,18 +285,27 @@ public class GriefPreventionExpansion extends PlaceholderExpansion implements Co
                         getString("color.neutral", "")
                                 + getString("translate.unclaimed", "Unclaimed!"));
             } else {
-                if (claim.allowAccess(player) == null){
-                    //Trusted
-                    return ChatColor.translateAlternateColorCodes('&',
-                            getString("color.trusted", "") + String.valueOf(claim.getOwnerName()));
-                }else{
-                    // not trusted
-                    return ChatColor.translateAlternateColorCodes('&',
-                            getString("color.enemy", "") + String.valueOf(claim.getOwnerName()));
 
+                try {
+                    ClaimPermission claimPermission = claim.getPermission(String.valueOf(player.getUniqueId()));
+                    if (claimPermission != null && claimPermission.isGrantedBy(ClaimPermission.Access)) {
+                        //Trusted
+                        return ChatColor.translateAlternateColorCodes('&',
+                                getString("color.trusted", "") + claim.getOwnerName());
+                    } else {
+                        // not trusted
+                        return ChatColor.translateAlternateColorCodes('&',
+                                getString("color.enemy", "") + String.valueOf(claim.getOwnerName()));
+
+                    }
+
+                } catch (Exception e) {
+                    e.printStackTrace();
+                    return "";
                 }
             }
         }
+
         return null;
     }
 
@@ -271,5 +342,4 @@ public class GriefPreventionExpansion extends PlaceholderExpansion implements Co
         format.setMinimumFractionDigits(0);
         return format.format(d);
     }
-
 }
